@@ -24,9 +24,13 @@ jobs:
 
           TZ = ZoneInfo("Asia/Almaty")
           now = dt.datetime.now(TZ)
-          API = "https://api.telegram.org/bot" + os.environ["TELEGRAM_BOT_TOKEN"]
-          CHANNEL, OWNER = "@arutnews", "7604569267"
+          TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+          API = "https://api.telegram.org/bot" + TOKEN
+          CHANNEL, OWNER = "-1001286486503", "7604569267"
           LEAD, WINDOW = 12, 150
+          print("now (Almaty):", now.strftime("%Y-%m-%d %H:%M"), "| token length:", len(TOKEN))
+          me = requests.get(API + "/getMe", timeout=30).json()
+          print("bot check:", "OK @" + me["result"]["username"] if me.get("ok") else me)
 
           def norm(s):
               return re.sub(r"\W+", "", html.unescape(re.sub(r"<[^>]+>", " ", s)).lower())[:120]
@@ -37,13 +41,14 @@ jobs:
                       p = requests.get("https://t.me/s/arutnews", headers={"User-Agent": "Mozilla/5.0"}, timeout=30).text
                       if "tgme_widget_message" in p:
                           return [norm(t) for t in re.findall(r'tgme_widget_message_text[^>]*>(.*?)</div>', p, re.S)]
-                  except Exception:
-                      pass
+                  except Exception as e:
+                      print("channel read error:", e)
                   time.sleep(15)
               return None
 
           def alert(msg):
-              requests.post(API + "/sendMessage", data={"chat_id": OWNER, "text": "⚠️ ARUT dispatcher (GitHub): " + msg}, timeout=30)
+              r = requests.post(API + "/sendMessage", data={"chat_id": OWNER, "text": "⚠️ ARUT dispatcher (GitHub): " + msg}, timeout=30).json()
+              print("alert sent:", r.get("ok"), r.get("description", ""))
 
           path = f"queue/{now.date().isoformat()}.json"
           if not os.path.exists(path):
@@ -71,15 +76,18 @@ jobs:
               if norm(cap) in texts:
                   print(it["time"], "already posted"); continue
               r = requests.post(API + "/sendPhoto", data={"chat_id": CHANNEL, "photo": it["image_url"], "caption": cap}, timeout=120).json()
+              print(it["time"], "send by URL:", r.get("ok"), r.get("description", ""))
               if not r.get("ok"):
                   img = requests.get(it["image_url"], headers={"User-Agent": "Mozilla/5.0"}, timeout=60).content
                   r = requests.post(API + "/sendPhoto", data={"chat_id": CHANNEL, "caption": cap},
                                     files={"photo": ("image.png", img)}, timeout=120).json()
+                  print(it["time"], "send by upload:", r.get("ok"), r.get("description", ""))
               if r.get("ok"):
                   print(it["time"], "POSTED msg", r["result"]["message_id"])
               else:
                   problems.append(f'{it["time"]} Almaty: send failed: {r.get("description")}')
           if problems:
+              print("PROBLEMS:", problems)
               alert("; ".join(problems))
               sys.exit(1)
           PY
